@@ -54,15 +54,12 @@ public class SRNode {
         private long id;
         private int src;
         private int dst;
-        private long start;
-        private long end;
+
         
-    	public AckPacket(long id, int src, int dst, long start, long end) {
+    	public AckPacket(long id, int src, int dst) {
     		this.id = id;
     		this.src = src;
     		this.dst = dst;
-    		this.start = start;
-    		this.end = end;
     	}
     	
     	public AckPacket(String payload) {
@@ -71,19 +68,13 @@ public class SRNode {
     			this.id = Long.parseLong(m.group(1));
     			this.src = Integer.parseInt(m.group(2));
     			this.dst = Integer.parseInt(m.group(3));
-    			this.start = Long.parseLong(m.group(4));
-    			this.end = Long.parseLong(m.group(5));
     		} else {
     			throw new RuntimeException("mismatch");
     		}
     	}
 
 		public byte[] getPayload() {
-			return String.format(ACK_PAYLOAD_FORMAT, id, src, dst, start, end).getBytes();
-		}
-
-		public boolean isWindowUpdate() {
-			return start != 0 && end != 0;
+			return String.format(ACK_PAYLOAD_FORMAT, id, src, dst).getBytes();
 		}
     }
 
@@ -125,18 +116,21 @@ public class SRNode {
         String data = new String(packet.getData(), 0, packet.getLength());
         if(PAYLOAD_PATTERN.matcher(data).matches()) {
         	CharPacket rcv = new CharPacket(data);
-        	if (rcv.id >= receiverWindowPosition + windowSize || rcv.id < receiverWindowPosition) {
+        	if (rcv.id >= receiverWindowPosition + windowSize) {
         		System.out.println(formatDiscardPacket(Calendar.getInstance().getTimeInMillis(), rcv.id, rcv.data));
-        	} else {
+        	} else if (rcv.id < this.receiverWindowPosition) {
+    			send(new AckPacket(rcv.id, rcv.dst, rcv.src));
+    			System.out.println(formatRecievePacket1(Calendar.getInstance().getTimeInMillis(), rcv.id, rcv.data));
+    		} else {
         		receiverWindow[(int) (rcv.id % windowSize)] = true;
-        		if (rcv.id == this.receiverWindowPosition) {
+        		if (rcv.id <= this.receiverWindowPosition) {
         			advanceRecieverWindow();
-        			send(new AckPacket(rcv.id, rcv.dst, rcv.src, receiverWindowPosition, receiverWindowPosition + windowSize));
+        			send(new AckPacket(rcv.id, rcv.dst, rcv.src));
         			System.out.println(formatRecievePacket2(Calendar.getInstance().getTimeInMillis(), rcv.id, rcv.data, receiverWindowPosition, receiverWindowPosition + windowSize));
         		} else if (rcv.id > this.receiverWindowPosition && rcv.id < this.receiverWindowPosition + this.windowSize) {
-        			send(new AckPacket(rcv.id, rcv.dst, rcv.src, 0, 0));
+        			send(new AckPacket(rcv.id, rcv.dst, rcv.src));
         			System.out.println(formatRecievePacket1(Calendar.getInstance().getTimeInMillis(), rcv.id, rcv.data));
-        		}
+        		} 
         	}
         } else if (ACK_PAYLOAD_PATTERN.matcher(data).matches()) {
         	AckPacket ack = new AckPacket(data);
@@ -147,10 +141,7 @@ public class SRNode {
 
             	if (ack.id == this.senderWindowPosition) {
             		advanceSenderWindow();
-            	}
-
-            	if (ack.isWindowUpdate()) {
-            		System.out.println(formatRecieveAck2(Calendar.getInstance().getTimeInMillis(), ack.id, ack.start, ack.end));
+            		System.out.println(formatRecieveAck2(Calendar.getInstance().getTimeInMillis(), ack.id, senderWindowPosition, senderWindowPosition + windowSize));
             	} else {
             		System.out.println(formatRecieveAck1(Calendar.getInstance().getTimeInMillis(), ack.id));
             	}
@@ -160,8 +151,8 @@ public class SRNode {
 
     private void advanceRecieverWindow() {
     	int index = (int) (receiverWindowPosition % windowSize);
-		while (index < windowSize && receiverWindow[index]) {
-			receiverWindow[index] = false;
+		while (receiverWindow[index % windowSize]) {
+			receiverWindow[index % windowSize] = false;
 			receiverWindowPosition++;
 			index++;
 		}
@@ -169,14 +160,19 @@ public class SRNode {
 
 	private void advanceSenderWindow() {
     	int index = (int) (senderWindowPosition % windowSize);
-		while (index < windowSize && senderWindow[index]) {
-			senderWindow[index] = false;
+		while (senderWindow[index % windowSize]) {
+			senderWindow[index % windowSize] = false;
 			senderWindowPosition++;
 			index++;
 		}
 		while (!sendBuffer.isEmpty() && sendBuffer.get(0).id < senderWindowPosition + windowSize) {
-			send(sendBuffer.remove(0));
+			sendWithTimeout(sendBuffer.remove(0));
 		}
+	}
+
+	private void sendWithTimeout(CharPacket p) {
+		send(p);
+		timer.schedule(new AckTimerTask(p, this), this.timeout);
 	}
 
 	private long getNextPacketId() {
@@ -195,9 +191,12 @@ public class SRNode {
 			@Override
 			public void run() {
 				if (p.id < (handler.senderWindowPosition + handler.windowSize) && p.id >= handler.senderWindowPosition && !handler.senderWindow[(int) (p.id % handler.windowSize)]) {
-					send(p);
+					sendWithTimeout(p);
+					System.out.println(formatPacketTimeout(Calendar.getInstance().getTimeInMillis(), p.id));
 				}
 			}
+
+
 	}
 	
 	public void send(String s) {
@@ -205,13 +204,13 @@ public class SRNode {
 			long id = getNextPacketId();
 			CharPacket p = new CharPacket(id, srcPort, dstPort, s.charAt(i));
 			if (id < senderWindowPosition + windowSize) {
-				send(p);
-				timer.schedule(new AckTimerTask(p, this), this.timeout);
+				sendWithTimeout(p);
 			} else {
 				sendBuffer.add(p);
 			}
 		}
     }
+
 
 	public void send(Packet packet) {
         this.sender.send(packet);
@@ -458,8 +457,8 @@ public class SRNode {
         return String.format(RCV_ACK_2_FMT, timestamp, id, start, end);
     }
 
-    private static String formatPacketTimeout(long timestamp, int packetId) {
-        return String.format(PKT_TIMEOUT_FMT, timestamp, packetId);
+    private static String formatPacketTimeout(long timestamp, long id) {
+        return String.format(PKT_TIMEOUT_FMT, timestamp, id);
     }
 
     private static String formatRecievePacket1(long timestamp, long id, char contents) {
@@ -492,8 +491,8 @@ public class SRNode {
     
     private static final Pattern PAYLOAD_PATTERN = Pattern.compile("^id:(\\d*);src:(\\d*);dst:(\\d*);data:(.);$");
     private static final String PAYLOAD_FORMAT = "id:%d;src:%d;dst:%d;data:%s;";    
-    private static final Pattern ACK_PAYLOAD_PATTERN = Pattern.compile("^ack:(\\d*);src:(\\d*);dst:(\\d*);start:(\\d*);end:(\\d*);$");
-    private static final String ACK_PAYLOAD_FORMAT = "ack:%d;src:%d;dst:%d;start:%d;end:%d;";
+    private static final Pattern ACK_PAYLOAD_PATTERN = Pattern.compile("^ack:(\\d*);src:(\\d*);dst:(\\d*);$");
+    private static final String ACK_PAYLOAD_FORMAT = "ack:%d;src:%d;dst:%d;";
     
     
 
