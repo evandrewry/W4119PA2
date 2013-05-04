@@ -82,7 +82,8 @@ public class DVNode {
 	if (PAYLOAD_PATTERN.matcher(data).matches()) {
 	    respondToDVPacket(new DVPacket(data));
 	} else {
-	    throw new RuntimeException("couldn't match payload to a known packet type");
+	    throw new RuntimeException(
+		    "couldn't match payload to a known packet type");
 	}
     }
 

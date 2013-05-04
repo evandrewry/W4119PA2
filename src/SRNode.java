@@ -1,12 +1,10 @@
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
-import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -48,7 +46,8 @@ public class SRNode {
 	this.socket = new DatagramSocket(dstPort);
 	this.pool = Executors.newFixedThreadPool(3);
 	this.reciever = new UDPReciever(socket, this);
-	this.sender = new UDPSender(new DatagramSocket(), "localhost", srcPort, this);
+	this.sender = new UDPSender(new DatagramSocket(), "localhost", srcPort,
+		this);
 	this.inputReader = new InputReader(this);
     }
 
@@ -96,7 +95,7 @@ public class SRNode {
     }
 
     private void respondToCharPacket(CharPacket rcv) {
-	if (Math.random() < this.lossRate){
+	if (Math.random() < this.lossRate) {
 	    System.out.println(formatDiscardPacket(timestamp(), rcv.id,
 		    rcv.data));
 	} else if (rcv.id >= recieverBase + windowSize) {
@@ -507,9 +506,12 @@ public class SRNode {
     private static final String RCV_PKT_2_FMT = "[%s] packet-%d %c recieved; window = [%d, %d]";
     private static final String SND_ACK_FMT = "[%s] ACK-%d sent";
     private static final String DISCARD_PKT_FMT = "[%s] packet-%d %c discarded";
-    private static final Pattern SND_CMD_PATTERN = Pattern.compile("^send (.*)$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern PAYLOAD_PATTERN = Pattern.compile("^id:(\\d*);src:(\\d*);dst:(\\d*);data:(.);$");
+    private static final Pattern SND_CMD_PATTERN = Pattern.compile(
+	    "^send (.*)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PAYLOAD_PATTERN = Pattern
+	    .compile("^id:(\\d*);src:(\\d*);dst:(\\d*);data:(.);$");
     private static final String PAYLOAD_FORMAT = "id:%d;src:%d;dst:%d;data:%s;";
-    private static final Pattern ACK_PAYLOAD_PATTERN = Pattern.compile("^ack:(\\d*);src:(\\d*);dst:(\\d*);$");
+    private static final Pattern ACK_PAYLOAD_PATTERN = Pattern
+	    .compile("^ack:(\\d*);src:(\\d*);dst:(\\d*);$");
     private static final String ACK_PAYLOAD_FORMAT = "ack:%d;src:%d;dst:%d;";
 }
