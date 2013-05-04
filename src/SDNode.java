@@ -42,6 +42,7 @@ public class SDNode {
     private static final int TIMEOUT = 300;
     private HashMap<Integer, Long> currentPacketId = new HashMap<Integer, Long>();
     private ArrayList<Packet> sendBuffer = new ArrayList<Packet>();
+    private HashMap<Integer, TestPacket> tests = new HashMap<Integer, TestPacket>();
 
     public static void main(String[] args) {
 	if (args.length < 1) {
@@ -86,8 +87,8 @@ public class SDNode {
 	    this.lossRates.put(neighbor, lossRates[i]);
 	    this.senderWindow.put(neighbor, emptyWindow());
 	    this.receiverWindow.put(neighbor, emptyWindow());
-	    this.sendBase.put(neighbor, new Long(0));
-	    this.recieverBase.put(neighbor, new Long(0));
+	    this.sendBase.put(neighbor, 0L);
+	    this.recieverBase.put(neighbor, 0L);
 	    this.currentPacketId.put(neighbor, 0L);
 	}
 
@@ -123,6 +124,9 @@ public class SDNode {
 	    if (DV_PAYLOAD_PATTERN.matcher(data).matches()) {
 		rcv = new DVPacket(data);
 		respondToDVPacket((DVPacket) rcv);
+	    } else if (TEST_PAYLOAD_PATTERN.matcher(data).matches()) {
+		rcv = new TestPacket(data);
+		respondToTestPacket((TestPacket) rcv);
 	    } else {
 		throw new RuntimeException(
 			"couldn't match payload to a known packet type");
@@ -132,6 +136,23 @@ public class SDNode {
 
 
 
+    private void respondToTestPacket(TestPacket rcv) {
+	if (Math.random() < this.lossRates.get(rcv.getSrcPort())) {
+	    return;
+	}	
+	
+	sendAckAndMoveWindow(rcv);
+
+	if (rcv.finaldest == this.port) {
+	    
+	} else if (routingTable.containsKey(rcv.finaldest)) {
+	    forwardTestPacket(rcv.finaldest);
+	} else {
+	    System.out.println("broken route!!!!");
+	}
+    }
+
+
     private void sendAckAndMoveWindow(Packet rcv) {
 	if (rcv.getId() >= recieverBase.get(rcv.getSrcPort()) + WINDOW_SIZE) {
 	    /* discard packets outside the window */
@@ -139,7 +160,7 @@ public class SDNode {
 		|| receiverWindow.get(rcv.getSrcPort())[(int) (rcv.getId() % WINDOW_SIZE)]) {
 	    /* send duplicate ack for already received packets */
 	    send(new AckPacket(rcv.getId(), rcv.getDestPort(), rcv.getSrcPort()));
-	    printReceivePacket1(rcv);
+	    //printReceivePacket1(rcv);
 	} else {
 	    /* we are receiving a packet in the window */
 	    /* set the flag for this packet in the window */
@@ -148,36 +169,41 @@ public class SDNode {
 		/* if we are receiving the packet at the beginning of the */
 		/* window, advance the window and send an ack */
 		advanceRecieverWindow(rcv.getSrcPort());
-		printReceivePacket2(rcv);
+		//printReceivePacket2(rcv);
 	    } else {
-		printReceivePacket1(rcv);
+		//printReceivePacket1(rcv);
 	    }
 	    send(new AckPacket(rcv.getId(), rcv.getDestPort(), rcv.getSrcPort()));
 	}
     }
+//
+//    private static String formatRecievePacket1(long timestamp, long id,
+//	    char contents) {
+//	return String.format(RCV_PKT_1_FMT, timestamp, id, contents);
+//    }
+//
+//    private static String formatRecievePacket2(long timestamp, long id,
+//	    char contents, long window2, long l) {
+//	return String
+//		.format(RCV_PKT_2_FMT, timestamp, id, contents, window2, l);
+//    }
 
-    private static String formatRecievePacket1(long timestamp, long id,
-	    char contents) {
-	return String.format(RCV_PKT_1_FMT, timestamp, id, contents);
-    }
-
-    private static String formatRecievePacket2(long timestamp, long id,
-	    char contents, long window2, long l) {
-	return String
-		.format(RCV_PKT_2_FMT, timestamp, id, contents, window2, l);
-    }
-
-    private void printReceivePacket2(Packet rcv) {
-	System.out.println(formatRecievePacket2(timestamp(), rcv.getId(), 'o',
-		recieverBase.get(rcv.getSrcPort()),
-		recieverBase.get(rcv.getSrcPort()) + WINDOW_SIZE));
-    }
-
-    private void printReceivePacket1(Packet rcv) {
-	System.out.println(formatRecievePacket1(timestamp(), rcv.getId(), 'o'));
-    }
+//    private void printReceivePacket2(Packet rcv) {
+//	System.out.println(formatRecievePacket2(timestamp(), rcv.getId(), 'o',
+//		recieverBase.get(rcv.getSrcPort()),
+//		recieverBase.get(rcv.getSrcPort()) + WINDOW_SIZE));
+//    }
+//
+//    private void printReceivePacket1(Packet rcv) {
+//	System.out.println(formatRecievePacket1(timestamp(), rcv.getId(), 'o'));
+//    }
 
     private void respondToAck(AckPacket ack) {
+	if (tests.containsKey(ack.src) && tests.get(ack.src).id == ack.id) {
+	    System.out.println(formatFinishSending(timestamp(), tests.get(ack.src).finaldest));
+	    tests.remove(ack.src);
+	} 
+	
 	if (ack.id >= sendBase.get(ack.src) + WINDOW_SIZE
 		|| ack.id < sendBase.get(ack.src)) {
 	    System.out.println("Stray ACK");
@@ -186,11 +212,11 @@ public class SDNode {
 
 	    if (ack.id == this.sendBase.get(ack.src)) {
 		advanceSenderWindow(ack.src);
-		System.out.println(formatRecieveAck2(timestamp(), ack.id,
-			sendBase.get(ack.src), sendBase.get(ack.src)
-				+ WINDOW_SIZE));
+//		System.out.println(formatRecieveAck2(timestamp(), ack.id,
+//			sendBase.get(ack.src), sendBase.get(ack.src)
+//				+ WINDOW_SIZE));
 	    } else {
-		System.out.println(formatRecieveAck1(timestamp(), ack.id));
+//		System.out.println(formatRecieveAck1(timestamp(), ack.id));
 	    }
 	}
     }
@@ -235,7 +261,7 @@ public class SDNode {
 	public void run() {
 	    if (shouldResend()) {
 		sendWithTimeout(p);
-		System.out.println(formatPacketTimeout(timestamp(), p.getId()));
+		//System.out.println(formatPacketTimeout(timestamp(), p.getId()));
 	    }
 	}
 
@@ -284,10 +310,10 @@ public class SDNode {
     }
 
     public void handleSend(Packet packet) {
-	if (packet instanceof DVPacket) {
-	    DVPacket p = (DVPacket) packet;
-	    System.out.println(formatSendMessage(timestamp(), p.src, p.dst));
-	}
+//	if (packet instanceof DVPacket) {
+//	    DVPacket p = (DVPacket) packet;
+//	    System.out.println(formatSendMessage(timestamp(), p.src, p.dst));
+//	}
     }
 
     private void run() throws SocketException {
@@ -357,21 +383,62 @@ public class SDNode {
 
 		broadcastUpdateEntry(routingTable.get(port));
 	    }
+	} else {
+	    m = SND_CMD_PATTERN.matcher(s);
+	    if (m.matches()) {
+		int dst = Integer.parseInt(m.group(1));
+		int num = Integer.parseInt(m.group(2));
+		try {
+		    sendTestPackets(dst, num);
+		} catch (IllegalArgumentException e) {
+		    System.out.println(SEND_CMD_USAGE);
+		}
+	    }
 	}
+    }
 
+    private void sendTestPackets(int dst, int num) {
+	System.out.println(formatStartSending(timestamp(), dst));
+	long endid = currentPacketId.get(routingTable.get(dst).node) + num - 1;
+	tests.put(routingTable.get(dst).next, new TestPacket(endid, this.port, routingTable.get(dst).next, this.port, dst, endid));
+	for (int i = 0; i < num; i++) {
+	    sendTestPacket(dst);
+	}
+    }
+
+    private String formatFinishSending(long timestamp, int dst) {
+	return String.format(FINISH_SENDING_FMT, timestamp, dst);
+
+    }
+
+    private static String formatStartSending(long timestamp, int dst) {
+	return String.format(START_SENDING_FMT, timestamp, dst);
+    }
+
+    private void sendTestPacket(int dst) {
+	forwardTestPacket(dst);
+    }
+
+    private void forwardTestPacket(int dst) {
+	if (routingTable.containsKey(dst)) {
+		int nextHop = routingTable.get(dst).next;
+		nextHop = nextHop == this.port ? dst : nextHop;
+	} else {
+	    throw new RuntimeException("host not in routing table");
+	}	
     }
 
     private void broadcastRoutingTable() {
 	for (int node : routingTable.keySet()) {
 	    broadcastEntry(routingTable.get(node), false);
 	}
-
     }
 
     private void broadcastEntry(RoutingTableEntry e, boolean forceUpdate) {
 	for (int neighbor : neighbors) {
 	    sendWithTimeout(new DVPacket(getNextPacketId(neighbor), port, neighbor,
 		    e.node, e.next, e.weight, forceUpdate));
+	    System.out.println(formatSendMessage(timestamp(), port, neighbor));
 	}
     }
 
@@ -379,13 +446,14 @@ public class SDNode {
 	for (int neighbor : neighbors) {
 	    sendWithTimeout(new DVPacket(getNextPacketId(neighbor), port, neighbor,
 		    e.node, e.next, e.weight, true));
+	    System.out.println(formatSendMessage(timestamp(), port, neighbor));
 	}
     }
 
     private long getNextPacketId(int neighbor) {
 	long id = currentPacketId.get(neighbor);
 	currentPacketId.put(neighbor, id + 1);
-	return id + 1;
+	return id;
     }
 
     public void send(Packet packet) {
@@ -628,6 +696,58 @@ public class SDNode {
 	}
     }
 
+
+    private class TestPacket implements Packet {
+	private long id;
+	private int src;
+	private int dst;
+	private int absolution;
+	private int finaldest;
+	private long endid;
+
+	public TestPacket(long id, int src, int dst, int absolution, int finaldest, long endid) {
+	    this.id = id;
+	    this.src = src;
+	    this.dst = dst;
+	    this.absolution = absolution;
+	    this.finaldest = finaldest;
+	    this.endid = endid;
+	}
+
+	public TestPacket(String payload) {
+	    Matcher m = TEST_PAYLOAD_PATTERN.matcher(payload);
+	    if (m.matches()) {
+		this.id = Long.parseLong(m.group(1));
+		this.src = Integer.parseInt(m.group(2));
+		this.dst = Integer.parseInt(m.group(3));
+		this.absolution = Integer.parseInt(m.group(4));
+		this.finaldest = Integer.parseInt(m.group(5));
+		this.endid = Long.parseLong(m.group(6));
+	    } else {
+		throw new RuntimeException("mismatch");
+	    }
+	}
+
+	public byte[] getPayload() {
+	    return String.format(TEST_PAYLOAD_FMT, id, src, dst, absolution, finaldest, endid).getBytes();
+	}
+
+	@Override
+	public int getDestPort() {
+	    return this.dst;
+	}
+
+	@Override
+	public long getId() {
+	    return this.id;
+	}
+
+	@Override
+	public int getSrcPort() {
+	    return this.src;
+	}
+    }
+    
     private static String formatSendMessage(long timestamp, int from, int to) {
 	return String.format(SND_MSG_FMT, timestamp, from, to);
     }
@@ -680,20 +800,20 @@ public class SDNode {
 	return Calendar.getInstance().getTimeInMillis();
     }
 
-    private static String formatRecieveAck1(long timestamp, long id) {
-	return String.format(RCV_ACK_1_FMT, timestamp, id);
-    }
+//    private static String formatRecieveAck1(long timestamp, long id) {
+//	return String.format(RCV_ACK_1_FMT, timestamp, id);
+//    }
+//
+//    private static String formatRecieveAck2(long timestamp, long id,
+//	    long start, long end) {
+//	return String.format(RCV_ACK_2_FMT, timestamp, id, start, end);
+//    }
+//
+//    private static String formatPacketTimeout(long timestamp, long id) {
+//	return String.format(PKT_TIMEOUT_FMT, timestamp, id);
+//    }
 
-    private static String formatRecieveAck2(long timestamp, long id,
-	    long start, long end) {
-	return String.format(RCV_ACK_2_FMT, timestamp, id, start, end);
-    }
-
-    private static String formatPacketTimeout(long timestamp, long id) {
-	return String.format(PKT_TIMEOUT_FMT, timestamp, id);
-    }
-
-    private static final String PKT_TIMEOUT_FMT = "[%s] packet-%d timeout";
+//    private static final String PKT_TIMEOUT_FMT = "[%s] packet-%d timeout";
 
     private static final String SND_MSG_FMT = "[%s] Message sent from Node %d to Node %d";
     private static final String RCV_MSG_FMT = "[%s] Message received at Node %d from Node %d";
@@ -701,7 +821,11 @@ public class SDNode {
     private static final String DV_PAYLOAD_FMT = "id:%d;src:%d;dst:%d;node:%d;next:%d;weight:%s;update:%s";
     private static final Pattern DV_PAYLOAD_PATTERN = Pattern
 	    .compile("^id:(\\d*);src:(\\d+);dst:(\\d+);node:(\\d+);next:(\\d+);weight:(\\d*\\.?\\d*);update:(true|false)$");
+    private static final String TEST_PAYLOAD_FMT = "id:%d;src:%d;dst:%d;origin:%d;final:%d;endid:%d";
+    private static final Pattern TEST_PAYLOAD_PATTERN = Pattern
+	    .compile("^id:(\\d*);src:(\\d+);dst:(\\d+);origin:(\\d+);final:(\\d+);endid:(\\d+);$");
 
+   
     private static final String ROUTING_TABLE_FMT = "[%s] Node %d - Routing Table\n%s";
     private static final String ROUTING_TABLE_ENTRY_FMT = "Node %d [next %d] -> (%s) \n%s";
     private static final String ROUTING_TABLE_NEXT_HOP_ENTRY_FMT = "Node %d -> (%s) \n%s";
@@ -713,15 +837,15 @@ public class SDNode {
     private static final Pattern ACK_PAYLOAD_PATTERN = Pattern
 	    .compile("^ack:(\\d*);src:(\\d*);dst:(\\d*);$");
     private static final String ACK_PAYLOAD_FORMAT = "ack:%d;src:%d;dst:%d;";
-    private static final String RCV_ACK_1_FMT = "[%s] ACK-%d recieved";
-    private static final String RCV_ACK_2_FMT = "[%s] ACK-%d recieved; window = [%d, %d]";
+ //   private static final String RCV_ACK_1_FMT = "[%s] ACK-%d recieved";
+ //   private static final String RCV_ACK_2_FMT = "[%s] ACK-%d recieved; window = [%d, %d]";
 
-    private static final String SND_PKT_FMT = "[%s] packet-%d %c sent";
-    private static final String RCV_PKT_1_FMT = "[%s] packet-%d %c recieved";
-    private static final String RCV_PKT_2_FMT = "[%s] packet-%d %c recieved; window = [%d, %d]";
-    private static final String SND_ACK_FMT = "[%s] ACK-%d sent";
+//    private static final String SND_PKT_FMT = "[%s] packet-%d %c sent";
+ //   private static final String RCV_PKT_1_FMT = "[%s] packet-%d %c recieved";
+  //  private static final String RCV_PKT_2_FMT = "[%s] packet-%d %c recieved; window = [%d, %d]";
+ //   private static final String SND_ACK_FMT = "[%s] ACK-%d sent";
     private static final Pattern SND_CMD_PATTERN = Pattern.compile(
-	    "^send (.*)$", Pattern.CASE_INSENSITIVE);
+	    "^send (\\d+) (\\d+)$", Pattern.CASE_INSENSITIVE);
     // private static final Pattern PAYLOAD_PATTERN =
     // Pattern.compile("^id:(\\d*);src:(\\d*);dst:(\\d*);data:(.);$");
     // private static final String PAYLOAD_FORMAT =
@@ -730,5 +854,11 @@ public class SDNode {
     private static final Pattern CHANGE_CMD_PATTERN = Pattern
 	    .compile("change(( (\\d+) (\\d*\\.?\\d*))+)");
     private static final String CHANGE_CMD_USAGE = "change <node1port> <node1loss-rate>.... <nodeiport> <nodeiloss-rate>";
+    private static final String SEND_CMD_USAGE = "send <dest-port> <num-packets>";
+    
+    private static final String START_SENDING_FMT = "[%s] start %d";
+    private static final String FINISH_SENDING_FMT = "[%s] finish %d";
+    private static final String FINISH_RECEIVING_FMT = "[%s] finish %d %d %s";
+
 
 }
